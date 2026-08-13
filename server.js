@@ -19,6 +19,16 @@ app.use('/api/audit', require('./routes/auditRoutes'));
 app.use('/api/parties', require('./routes/partyRoutes'));
 app.use('/api/admins', require('./routes/adminRoutes'));
 
+
+// Keep-Alive / Health Check Route for UptimeRobot
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    message: 'Server is awake', 
+    timestamp: new Date().toISOString() 
+  });
+});
+
 app.listen(port, '0.0.0.0', () => {
   console.log(`🚀 Production Server running on port ${port}`);
 });
