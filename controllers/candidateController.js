@@ -63,3 +63,34 @@ exports.deleteCandidate = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+exports.getCandidatesByBooth = async (req, res) => {
+  try {
+    const { boothId } = req.params;
+    const query = `
+      SELECT 
+        c.id as candidate_id,
+        c.candidate_name,
+        p.id as party_id,
+        p.party_name,
+        p.party_code,
+        p.party_icon_url,
+        b.id as booth_id,
+        b.booth_name,
+        b.unique_booth_code,
+        w.id as ward_id,
+        w.ward_name
+      FROM booths b
+      JOIN wards w ON b.ward_id = w.id
+      JOIN candidates c ON c.ward_id = w.id
+      JOIN political_parties p ON c.party_id = p.id
+      WHERE b.id = $1
+      ORDER BY p.party_name ASC;
+    `;
+    const result = await pool.query(query, [boothId]);
+    res.json({ success: true, candidates: result.rows });
+  } catch (err) {
+    console.error("Error fetching candidates for booth:", err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
