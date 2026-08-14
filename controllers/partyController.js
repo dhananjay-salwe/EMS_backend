@@ -12,9 +12,17 @@ exports.getParties = async (req, res) => {
 exports.addParty = async (req, res) => {
   try {
     const { party_name, party_code, party_icon_url } = req.body;
+    let finalIconUrl = party_icon_url;
+
+    // Convert uploaded image to Base64
+    if (req.file) {
+      const base64Image = req.file.buffer.toString('base64');
+      finalIconUrl = `data:${req.file.mimetype};base64,${base64Image}`;
+    }
+
     await pool.query(
       'INSERT INTO political_parties (party_name, party_code, party_icon_url) VALUES ($1, $2, $3)',
-      [party_name, party_code.toUpperCase(), party_icon_url]
+      [party_name, party_code.toUpperCase(), finalIconUrl]
     );
     res.json({ success: true, message: 'Political Party created successfully' });
   } catch (err) {
@@ -26,9 +34,16 @@ exports.updateParty = async (req, res) => {
   try {
     const { id } = req.params;
     const { party_name, party_code, party_icon_url } = req.body;
+    let finalIconUrl = party_icon_url;
+
+    if (req.file) {
+      const base64Image = req.file.buffer.toString('base64');
+      finalIconUrl = `data:${req.file.mimetype};base64,${base64Image}`;
+    }
+
     await pool.query(
       'UPDATE political_parties SET party_name = $1, party_code = $2, party_icon_url = $3 WHERE id = $4',
-      [party_name, party_code.toUpperCase(), party_icon_url, id]
+      [party_name, party_code.toUpperCase(), finalIconUrl, id]
     );
     res.json({ success: true, message: 'Political Party updated' });
   } catch (err) {
