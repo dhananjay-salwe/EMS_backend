@@ -24,8 +24,14 @@ exports.adminLogin = async (req, res) => {
 exports.operatorLogin = async (req, res) => {
     const { username, password } = req.body;
     try {
+        // JOIN with booths to get the assigned booth details on login
         const result = await pool.query(
-            'SELECT id, username, full_name FROM operators WHERE username = $1 AND password_hash = $2',
+            `SELECT 
+                o.id, o.username, o.full_name, o.assigned_booth_id, 
+                b.unique_booth_code, b.booth_name 
+             FROM operators o
+             LEFT JOIN booths b ON o.assigned_booth_id = b.id
+             WHERE o.username = $1 AND o.password_hash = $2`,
             [username, password]
         );
         
