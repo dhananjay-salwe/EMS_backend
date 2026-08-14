@@ -19,6 +19,8 @@ app.use('/api/audit', require('./routes/auditRoutes'));
 app.use('/api/parties', require('./routes/partyRoutes'));
 app.use('/api/admins', require('./routes/adminRoutes'));
 
+app.use('/api/candidates', require('./routes/candidateRoutes'));
+
 
 // Keep-Alive / Health Check Route for UptimeRobot
 app.get('/api/health', (req, res) => {
