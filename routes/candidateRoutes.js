@@ -7,4 +7,6 @@ router.post('/add', candidateController.addCandidate);
 router.put('/:id', candidateController.updateCandidate);
 router.delete('/:id', candidateController.deleteCandidate);
 
+router.get('/by-booth/:boothId', candidateController.getCandidatesByBooth);
+
 module.exports = router;
