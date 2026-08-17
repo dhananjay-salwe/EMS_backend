@@ -1,4 +1,4 @@
-const { pool } = require('../config/db');
+const { pool, supabase } = require('../config/db');
 
 // --- 1. DASHBOARD ENGINE (INDIAN ELECTION STYLE) ---
 exports.getElectionSummary = async (req, res) => {
@@ -94,9 +94,38 @@ exports.submitVotes = async (req, res) => {
         }
 
         const parsedVotes = typeof votes === 'string' ? JSON.parse(votes) : votes;
-        const tallySheetUrl = file 
-            ? `https://via.placeholder.com/600x800.png?text=Tally+Sheet+Booth+${booth_id}`
-            : 'https://via.placeholder.com/600x800.png?text=No+Image';
+        let tallySheetUrl = null;
+
+        // Upload physical photo directly to Supabase Storage
+        if (file) {
+            try {
+                const fileExt = file.originalname ? file.originalname.split('.').pop() : 'jpg';
+                const fileName = `tally_${booth_id}_${Date.now()}.${fileExt}`;
+                
+                const { error: uploadError } = await supabase.storage
+                    .from('EMS_tally-sheets')
+                    .upload(fileName, file.buffer, {
+                        contentType: file.mimetype || 'image/jpeg',
+                        upsert: true
+                    });
+
+                if (!uploadError) {
+                    const { data: urlData } = supabase.storage
+                        .from('EMS_tally-sheets')
+                        .getPublicUrl(fileName);
+                    tallySheetUrl = urlData.publicUrl;
+                } else {
+                    // Fallback to Base64 Data URI if bucket fails
+                    console.warn('Supabase storage upload error, falling back to base64:', uploadError.message);
+                    const base64Data = file.buffer.toString('base64');
+                    tallySheetUrl = `data:${file.mimetype || 'image/jpeg'};base64,${base64Data}`;
+                }
+            } catch (storageErr) {
+                console.warn('Storage handler error:', storageErr.message);
+                const base64Data = file.buffer.toString('base64');
+                tallySheetUrl = `data:${file.mimetype || 'image/jpeg'};base64,${base64Data}`;
+            }
+        }
 
         await client.query('BEGIN');
 
@@ -108,7 +137,8 @@ exports.submitVotes = async (req, res) => {
 
         for (const [candidateId, count] of Object.entries(parsedVotes)) {
             const voteCount = parseInt(count, 10) || 0;
-            if (voteCount > 0) {
+            // Record all candidates (including 0 votes) so audit reports are complete
+            if (voteCount >= 0) {
                 await client.query(
                     `INSERT INTO vote_details (vote_record_id, candidate_id, vote_count) VALUES ($1, $2, $3)`,
                     [voteRecordId, candidateId, voteCount]

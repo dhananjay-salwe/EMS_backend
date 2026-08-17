@@ -2,6 +2,14 @@ const { pool } = require('../config/db');
 
 exports.getSubmissions = async (req, res) => {
   try {
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 10;
+    const offset = (page - 1) * limit;
+
+    const countRes = await pool.query('SELECT COUNT(*) FROM vote_records');
+    const totalRecords = parseInt(countRes.rows[0].count, 10);
+    const totalPages = Math.ceil(totalRecords / limit) || 1;
+
     const query = `
       SELECT 
         vr.id, 
@@ -27,12 +35,23 @@ exports.getSubmissions = async (req, res) => {
       FROM vote_records vr
       JOIN booths b ON vr.booth_id = b.id
       JOIN operators o ON vr.operator_id = o.id
-      ORDER BY vr.created_at DESC;
+      ORDER BY vr.created_at DESC
+      LIMIT $1 OFFSET $2;
     `;
-    const result = await pool.query(query);
-    res.json({ success: true, submissions: result.rows });
+    const result = await pool.query(query, [limit, offset]);
+
+    res.json({
+      success: true,
+      submissions: result.rows,
+      pagination: {
+        totalRecords,
+        totalPages,
+        currentPage: page,
+        limit
+      }
+    });
   } catch (err) {
-    console.error(err);
+    console.error('Audit fetch error:', err);
     res.status(500).json({ success: false, message: 'Failed to fetch audit records' });
   }
 };
