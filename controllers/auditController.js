@@ -1,4 +1,4 @@
-const { pool } = require('../config/db');
+const { pool } = require("../config/db");
 
 exports.getSubmissions = async (req, res) => {
   try {
@@ -6,15 +6,21 @@ exports.getSubmissions = async (req, res) => {
     const limit = parseInt(req.query.limit, 10) || 10;
     const offset = (page - 1) * limit;
 
-    const countRes = await pool.query('SELECT COUNT(*) FROM vote_records');
+    // const countRes = await pool.query('SELECT COUNT(*) FROM vote_records');
+
+    // Counts distinct booths/operators so pagination matches latest-only submissions
+    const countRes = await pool.query(
+      "SELECT COUNT(DISTINCT booth_id) FROM vote_records"
+    );
+
     const totalRecords = parseInt(countRes.rows[0].count, 10);
     const totalPages = Math.ceil(totalRecords / limit) || 1;
 
     const query = `
       SELECT 
-        vr.id, 
-        vr.tally_sheet_url, 
-        vr.created_at,
+        sub.id, 
+        sub.tally_sheet_url, 
+        sub.created_at,
         b.unique_booth_code, 
         b.booth_name,
         o.full_name as operator_name,
@@ -29,13 +35,18 @@ exports.getSubmissions = async (req, res) => {
             FROM vote_details vd
             JOIN candidates c ON vd.candidate_id = c.id
             JOIN political_parties p ON c.party_id = p.id
-            WHERE vd.vote_record_id = vr.id
+            WHERE vd.vote_record_id = sub.id
           ), '[]'::json
         ) as votes_breakdown
-      FROM vote_records vr
-      JOIN booths b ON vr.booth_id = b.id
-      JOIN operators o ON vr.operator_id = o.id
-      ORDER BY vr.created_at DESC
+      FROM (
+        SELECT DISTINCT ON (booth_id) 
+          id, booth_id, operator_id, tally_sheet_url, created_at
+        FROM vote_records
+        ORDER BY booth_id, created_at DESC
+      ) sub
+      JOIN booths b ON sub.booth_id = b.id
+      JOIN operators o ON sub.operator_id = o.id
+      ORDER BY sub.created_at DESC
       LIMIT $1 OFFSET $2;
     `;
     const result = await pool.query(query, [limit, offset]);
@@ -47,11 +58,13 @@ exports.getSubmissions = async (req, res) => {
         totalRecords,
         totalPages,
         currentPage: page,
-        limit
-      }
+        limit,
+      },
     });
   } catch (err) {
-    console.error('Audit fetch error:', err);
-    res.status(500).json({ success: false, message: 'Failed to fetch audit records' });
+    console.error("Audit fetch error:", err);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch audit records" });
   }
 };
