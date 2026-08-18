@@ -87,3 +87,63 @@ exports.deleteBooth = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+
+// changes for the ward creation and management
+exports.addWard = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { state_name, lga_name, ward_name } = req.body;
+    const sName = state_name?.trim();
+    const lName = lga_name?.trim();
+    const wName = ward_name?.trim();
+
+    if (!sName || !lName || !wName) {
+      return res.status(400).json({ success: false, message: 'State, LGA, and Ward name are required.' });
+    }
+
+    await client.query('BEGIN');
+
+    // 1. State
+    let stateRes = await client.query('SELECT id FROM states WHERE LOWER(state_name) = LOWER($1)', [sName]);
+    let stateId = stateRes.rows[0]?.id;
+    if (!stateId) {
+      const inserted = await client.query('INSERT INTO states (state_name) VALUES ($1) RETURNING id', [sName]);
+      stateId = inserted.rows[0].id;
+    }
+
+    // 2. LGA
+    let lgaRes = await client.query('SELECT id FROM lgas WHERE LOWER(lga_name) = LOWER($1) AND state_id = $2', [lName, stateId]);
+    let lgaId = lgaRes.rows[0]?.id;
+    if (!lgaId) {
+      const inserted = await client.query('INSERT INTO lgas (state_id, lga_name) VALUES ($1, $2) RETURNING id', [stateId, lName]);
+      lgaId = inserted.rows[0].id;
+    }
+
+    // 3. Ward
+    const checkWard = await client.query('SELECT id FROM wards WHERE LOWER(ward_name) = LOWER($1) AND lga_id = $2', [wName, lgaId]);
+    if (checkWard.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: 'This Ward already exists in the selected LGA.' });
+    }
+
+    await client.query('INSERT INTO wards (lga_id, ward_name) VALUES ($1, $2)', [lgaId, wName]);
+
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Ward created successfully' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ success: false, message: err.message });
+  } finally {
+    client.release();
+  }
+};
+
+exports.deleteWard = async (req, res) => {
+  try {
+    await pool.query('DELETE FROM wards WHERE id = $1', [req.params.id]);
+    res.json({ success: true, message: 'Ward deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
