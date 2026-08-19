@@ -20,6 +20,16 @@ exports.getElectionSummary = async (req, res) => {
     `;
     const wardVotesRes = await pool.query(wardVotesQuery);
     const partiesRes = await pool.query('SELECT * FROM political_parties ORDER BY party_name ASC');
+
+    // Fetch total database entities for stat cards
+    const totalWardsRes = await pool.query('SELECT COUNT(*) FROM wards');
+    const totalBoothsRes = await pool.query('SELECT COUNT(*) FROM booths');
+    const totalCandidatesRes = await pool.query('SELECT COUNT(*) FROM candidates');
+
+    const totalWardsCount = parseInt(totalWardsRes.rows[0].count, 10) || 0;
+    const totalBoothsCount = parseInt(totalBoothsRes.rows[0].count, 10) || 0;
+    const totalCandidatesCount = parseInt(totalCandidatesRes.rows[0].count, 10) || 0;
+
     
     const wardsMap = {};
     wardVotesRes.rows.forEach(row => {
@@ -73,8 +83,14 @@ exports.getElectionSummary = async (req, res) => {
     const partyLeaderboard = Object.values(partyStats).sort((a, b) => b.seats_won - a.seats_won || b.total_popular_votes - a.total_popular_votes);
 
     res.json({
-      success: true, total_seats: totalSeatsContested, total_votes: totalOverallVotes,
-      leaderboard: partyLeaderboard, ward_details: Object.values(wardsMap)
+      success: true,
+      total_wards: totalWardsCount,
+      total_booths: totalBoothsCount,
+      total_candidates: totalCandidatesCount,
+      total_votes: totalOverallVotes,
+      total_seats: totalSeatsContested,
+      leaderboard: partyLeaderboard,
+      ward_details: Object.values(wardsMap)
     });
   } catch (err) {
     console.error("Dashboard calculation error:", err.message);
