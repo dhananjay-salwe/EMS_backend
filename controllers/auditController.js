@@ -16,13 +16,16 @@ exports.getSubmissions = async (req, res) => {
     const totalRecords = parseInt(countRes.rows[0].count, 10);
     const totalPages = Math.ceil(totalRecords / limit) || 1;
 
-    const query = `
+const query = `
       SELECT 
         sub.id, 
         sub.tally_sheet_url, 
         sub.created_at,
         b.unique_booth_code, 
         b.booth_name,
+        w.ward_name,
+        l.lga_name,
+        s.state_name,
         o.full_name as operator_name,
         COALESCE(
           (
@@ -45,6 +48,9 @@ exports.getSubmissions = async (req, res) => {
         ORDER BY booth_id, created_at DESC
       ) sub
       JOIN booths b ON sub.booth_id = b.id
+      JOIN wards w ON b.ward_id = w.id
+      JOIN lgas l ON w.lga_id = l.id
+      JOIN states s ON l.state_id = s.id
       JOIN operators o ON sub.operator_id = o.id
       ORDER BY sub.created_at DESC
       LIMIT $1 OFFSET $2;
