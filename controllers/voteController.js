@@ -124,7 +124,7 @@ exports.getElectionSummary = async (req, res) => {
         ) vr ON vd.vote_record_id = vr.id
       ) vd ON vd.candidate_id = c.id
       */
-      // FIX: Use simplified cumulative join to aggregate all submissions for polling booths
+      -- FIX: Use simplified cumulative join to aggregate all submissions for polling booths
       LEFT JOIN vote_details vd ON vd.candidate_id = c.id
       GROUP BY w.id, w.ward_name, l.lga_name, s.state_name, c.id, c.candidate_name, p.id, p.party_name, p.party_code
       ORDER BY w.id, total_votes DESC;
