@@ -209,7 +209,66 @@ exports.submitVotes = async (req, res) => {
     const client = await pool.connect();
     try {
         const { operator_id, booth_id, votes } = req.body;
-        const file = req.file;
+        // OLD CODE:
+        // const file = req.file;
+        // 
+        // if (!operator_id || !booth_id || !votes) {
+        //     return res.status(400).json({ success: false, message: 'Missing required vote fields' });
+        // }
+        // 
+        // const parsedVotes = typeof votes === 'string' ? JSON.parse(votes) : votes;
+        // let tallySheetUrl = null;
+        // 
+        // // Upload physical photo directly to Supabase Storage
+        // if (file) {
+        //     try {
+        //         const fileExt = file.originalname ? file.originalname.split('.').pop() : 'jpg';
+        //         const fileName = `tally_${booth_id}_${Date.now()}.${fileExt}`;
+        //         
+        //         const { error: uploadError } = await supabase.storage
+        //             .from('EMS_tally-sheets')
+        //             .upload(fileName, file.buffer, {
+        //                 contentType: file.mimetype || 'image/jpeg',
+        //                 upsert: true
+        //             });
+        // 
+        //         if (!uploadError) {
+        //             const { data: urlData } = supabase.storage
+        //                 .from('EMS_tally-sheets')
+        //                 .getPublicUrl(fileName);
+        //             tallySheetUrl = urlData.publicUrl;
+        //         } else {
+        //             // OLD CODE:
+        //             // // Fallback to Base64 Data URI if bucket fails
+        //             // console.warn('Supabase storage upload error, falling back to base64:', uploadError.message);
+        //             // const base64Data = file.buffer.toString('base64');
+        //             // tallySheetUrl = `data:${file.mimetype || 'image/jpeg'};base64,${base64Data}`;
+        // 
+        //             // FIX: Disable database bloating base64 fallbacks; throw upload error instead
+        //             throw new Error(`Supabase storage upload error: ${uploadError.message}`);
+        //         }
+        //     } catch (storageErr) {
+        //         // OLD CODE:
+        //         // console.warn('Storage handler error:', storageErr.message);
+        //         // const base64Data = file.buffer.toString('base64');
+        //         // tallySheetUrl = `data:${file.mimetype || 'image/jpeg'};base64,${base64Data}`;
+        // 
+        //         // FIX: Propagate storage upload error to trigger client retry and rollback
+        //         console.error('Storage handler error:', storageErr.message);
+        //         throw new Error(`Failed to upload tally sheet photo: ${storageErr.message}`);
+        //     }
+        // }
+        // 
+        // await client.query('BEGIN');
+        // 
+        // const recordResult = await client.query(
+        //     `INSERT INTO vote_records (booth_id, operator_id, tally_sheet_url) VALUES ($1, $2, $3) RETURNING id`,
+        //     [booth_id, operator_id, tallySheetUrl]
+        // );
+
+        // FEATURE: Extracted files from fields upload and uploaded video & image to Supabase
+        const tallySheetFile = req.files && req.files['tally_sheet'] ? req.files['tally_sheet'][0] : null;
+        const tallyVideoFile = req.files && req.files['tally_video'] ? req.files['tally_video'][0] : null;
 
         if (!operator_id || !booth_id || !votes) {
             return res.status(400).json({ success: false, message: 'Missing required vote fields' });
@@ -217,17 +276,18 @@ exports.submitVotes = async (req, res) => {
 
         const parsedVotes = typeof votes === 'string' ? JSON.parse(votes) : votes;
         let tallySheetUrl = null;
+        let videoUrl = null;
 
         // Upload physical photo directly to Supabase Storage
-        if (file) {
+        if (tallySheetFile) {
             try {
-                const fileExt = file.originalname ? file.originalname.split('.').pop() : 'jpg';
+                const fileExt = tallySheetFile.originalname ? tallySheetFile.originalname.split('.').pop() : 'jpg';
                 const fileName = `tally_${booth_id}_${Date.now()}.${fileExt}`;
                 
                 const { error: uploadError } = await supabase.storage
                     .from('EMS_tally-sheets')
-                    .upload(fileName, file.buffer, {
-                        contentType: file.mimetype || 'image/jpeg',
+                    .upload(fileName, tallySheetFile.buffer, {
+                        contentType: tallySheetFile.mimetype || 'image/jpeg',
                         upsert: true
                     });
 
@@ -237,32 +297,46 @@ exports.submitVotes = async (req, res) => {
                         .getPublicUrl(fileName);
                     tallySheetUrl = urlData.publicUrl;
                 } else {
-                    // OLD CODE:
-                    // // Fallback to Base64 Data URI if bucket fails
-                    // console.warn('Supabase storage upload error, falling back to base64:', uploadError.message);
-                    // const base64Data = file.buffer.toString('base64');
-                    // tallySheetUrl = `data:${file.mimetype || 'image/jpeg'};base64,${base64Data}`;
-
-                    // FIX: Disable database bloating base64 fallbacks; throw upload error instead
                     throw new Error(`Supabase storage upload error: ${uploadError.message}`);
                 }
             } catch (storageErr) {
-                // OLD CODE:
-                // console.warn('Storage handler error:', storageErr.message);
-                // const base64Data = file.buffer.toString('base64');
-                // tallySheetUrl = `data:${file.mimetype || 'image/jpeg'};base64,${base64Data}`;
-
-                // FIX: Propagate storage upload error to trigger client retry and rollback
                 console.error('Storage handler error:', storageErr.message);
                 throw new Error(`Failed to upload tally sheet photo: ${storageErr.message}`);
+            }
+        }
+
+        // Upload physical video directly to Supabase Storage
+        if (tallyVideoFile) {
+            try {
+                const fileExt = tallyVideoFile.originalname ? tallyVideoFile.originalname.split('.').pop() : 'mp4';
+                const fileName = `tally_video_${booth_id}_${Date.now()}.${fileExt}`;
+                
+                const { error: uploadError } = await supabase.storage
+                    .from('EMS_tally-videos')
+                    .upload(fileName, tallyVideoFile.buffer, {
+                        contentType: tallyVideoFile.mimetype || 'video/mp4',
+                        upsert: true
+                    });
+
+                if (!uploadError) {
+                    const { data: urlData } = supabase.storage
+                        .from('EMS_tally-videos')
+                        .getPublicUrl(fileName);
+                    videoUrl = urlData.publicUrl;
+                } else {
+                    throw new Error(`Supabase storage video upload error: ${uploadError.message}`);
+                }
+            } catch (storageErr) {
+                console.error('Video storage handler error:', storageErr.message);
+                throw new Error(`Failed to upload tally video: ${storageErr.message}`);
             }
         }
 
         await client.query('BEGIN');
 
         const recordResult = await client.query(
-            `INSERT INTO vote_records (booth_id, operator_id, tally_sheet_url) VALUES ($1, $2, $3) RETURNING id`,
-            [booth_id, operator_id, tallySheetUrl]
+            `INSERT INTO vote_records (booth_id, operator_id, tally_sheet_url, video_url) VALUES ($1, $2, $3, $4) RETURNING id`,
+            [booth_id, operator_id, tallySheetUrl, videoUrl]
         );
         const voteRecordId = recordResult.rows[0].id;
 
