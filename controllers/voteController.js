@@ -113,6 +113,7 @@ exports.getElectionSummary = async (req, res) => {
       JOIN states s ON l.state_id = s.id
       JOIN candidates c ON c.ward_id = w.id
       JOIN political_parties p ON c.party_id = p.id
+      /* OLD CODE:
       LEFT JOIN (
         SELECT vd.candidate_id, vd.vote_count
         FROM vote_details vd
@@ -122,6 +123,9 @@ exports.getElectionSummary = async (req, res) => {
           ORDER BY booth_id, created_at DESC
         ) vr ON vd.vote_record_id = vr.id
       ) vd ON vd.candidate_id = c.id
+      */
+      // FIX: Use simplified cumulative join to aggregate all submissions for polling booths
+      LEFT JOIN vote_details vd ON vd.candidate_id = c.id
       GROUP BY w.id, w.ward_name, l.lga_name, s.state_name, c.id, c.candidate_name, p.id, p.party_name, p.party_code
       ORDER BY w.id, total_votes DESC;
     `;
