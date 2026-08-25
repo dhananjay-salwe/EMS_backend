@@ -104,8 +104,13 @@ exports.getSubmissions = async (req, res) => {
       whereClauses.push(`(o.full_name ILIKE $${queryParams.length} OR b.unique_booth_code ILIKE $${queryParams.length} OR b.booth_name ILIKE $${queryParams.length})`);
     }
 
-    const whereSql = whereClauses.length > 0 ? ' AND ' + whereClauses.join(' AND ') : '';
+        // OLD CODE:
+    // const whereSql = whereClauses.length > 0 ? ' AND ' + whereClauses.join(' AND ') : '';
 
+    // FIX: Update whereSql to start with WHERE instead of AND since the latest-only filter is removed
+    const whereSql = whereClauses.length > 0 ? ' WHERE ' + whereClauses.join(' AND ') : '';
+
+    /* OLD CODE:
     const countQuery = `
       SELECT COUNT(*)
       FROM vote_records sub
@@ -121,6 +126,18 @@ exports.getSubmissions = async (req, res) => {
         LIMIT 1
       )${whereSql};
     `;
+    */
+    // FIX: Remove latest-only subquery filter to return full historical submissions list
+    const countQuery = `
+      SELECT COUNT(*)
+      FROM vote_records sub
+      JOIN booths b ON sub.booth_id = b.id
+      JOIN wards w ON b.ward_id = w.id
+      JOIN lgas l ON w.lga_id = l.id
+      JOIN states s ON l.state_id = s.id
+      JOIN operators o ON sub.operator_id = o.id
+      ${whereSql};
+    `;
 
     const countRes = await pool.query(countQuery, queryParams);
     const totalRecords = parseInt(countRes.rows[0].count, 10);
@@ -130,6 +147,7 @@ exports.getSubmissions = async (req, res) => {
     const limitPlaceholder = `$${queryParams.length - 1}`;
     const offsetPlaceholder = `$${queryParams.length}`;
 
+    /* OLD CODE:
     const query = `
       SELECT 
         sub.id, 
@@ -167,6 +185,44 @@ exports.getSubmissions = async (req, res) => {
         ORDER BY vr.created_at DESC
         LIMIT 1
       )${whereSql}
+      ORDER BY sub.created_at DESC
+      LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder};
+    `;
+    */
+    // FIX: Include video_url and remove the single-latest-record subquery limitation to output full audit trail
+    const query = `
+      SELECT 
+        sub.id, 
+        sub.tally_sheet_url, 
+        sub.video_url,
+        sub.created_at,
+        b.unique_booth_code, 
+        b.booth_name,
+        w.ward_name,
+        l.lga_name,
+        s.state_name,
+        o.full_name as operator_name,
+        COALESCE(
+          (
+            SELECT json_agg(json_build_object(
+              'candidate_name', c.candidate_name,
+              'party_name', p.party_name,
+              'party_code', p.party_code,
+              'vote_count', vd.vote_count
+            ))
+            FROM vote_details vd
+            JOIN candidates c ON vd.candidate_id = c.id
+            JOIN political_parties p ON c.party_id = p.id
+            WHERE vd.vote_record_id = sub.id
+          ), '[]'::json
+        ) as votes_breakdown
+      FROM vote_records sub
+      JOIN booths b ON sub.booth_id = b.id
+      JOIN wards w ON b.ward_id = w.id
+      JOIN lgas l ON w.lga_id = l.id
+      JOIN states s ON l.state_id = s.id
+      JOIN operators o ON sub.operator_id = o.id
+      ${whereSql}
       ORDER BY sub.created_at DESC
       LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder};
     `;
