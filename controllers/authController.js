@@ -1,11 +1,14 @@
 const { pool } = require('../config/db');
 
+
 exports.adminLogin = async (req, res) => {
-    const { username, password } = req.body;
+    // FIX: Destructure 'email' instead of 'username'
+    const { email, password } = req.body;
     try {
+        // FIX: Query the 'email' column and return 'full_name' instead of 'username'
         const result = await pool.query(
-            'SELECT id, username, role FROM admins WHERE username = $1 AND password_hash = $2',
-            [username, password]
+            'SELECT id, full_name, email, role FROM users WHERE email = $1 AND password_hash = $2',
+            [email, password]
         );
         
         if (result.rows.length > 0) {
@@ -18,6 +21,25 @@ exports.adminLogin = async (req, res) => {
         res.status(500).json({ success: false, message: 'Server error' });
     }
 };
+
+// exports.adminLogin = async (req, res) => {
+//     const { username, password } = req.body;
+//     try {
+//         const result = await pool.query(
+//             'SELECT id, username, role FROM users WHERE username = $1 AND password_hash = $2',
+//             [username, password]
+//         );
+        
+//         if (result.rows.length > 0) {
+//             res.json({ success: true, admin: result.rows[0] });
+//         } else {
+//             res.status(401).json({ success: false, message: 'Invalid admin credentials' });
+//         }
+//     } catch (err) {
+//         console.error(err);
+//         res.status(500).json({ success: false, message: 'Server error' });
+//     }
+// };
 
 // ... existing adminLogin function ...
 
