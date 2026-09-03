@@ -118,6 +118,8 @@ exports.getCandidatesByWard = async (req, res) => {
       return res.status(400).json({ success: false, message: 'ward_id is required' });
     }
 
+    await ensureTableExists();
+
     const query = `
       SELECT DISTINCT 
         c.id,
@@ -125,9 +127,12 @@ exports.getCandidatesByWard = async (req, res) => {
         c.party_id,
         p.party_name,
         p.party_code,
-        p.party_icon_url
+        p.party_icon_url,
+        COALESCE(wcv.total_votes, 0) AS total_votes,
+        COALESCE(wcv.is_winner, false) AS is_winner
       FROM candidates c
       JOIN political_parties p ON c.party_id = p.id
+      LEFT JOIN ward_candidate_votes wcv ON c.id = wcv.candidate_id AND wcv.ward_id = $1
       WHERE c.ward_id = $1
       ORDER BY c.candidate_name ASC;
     `;
@@ -159,19 +164,21 @@ exports.upsertWardVotes = async (req, res) => {
     await client.query('BEGIN');
 
     const upsertQuery = `
-      INSERT INTO ward_candidate_votes (ward_id, candidate_id, total_votes, updated_at)
-      VALUES ($1, $2, $3, NOW())
+      INSERT INTO ward_candidate_votes (ward_id, candidate_id, total_votes, is_winner, updated_at)
+      VALUES ($1, $2, $3, $4, NOW())
       ON CONFLICT (ward_id, candidate_id)
       DO UPDATE SET 
         total_votes = EXCLUDED.total_votes,
+        is_winner = EXCLUDED.is_winner,
         updated_at = NOW();
     `;
 
     for (const item of votes) {
-      const { ward_id, candidate_id, total_votes } = item;
+      const { ward_id, candidate_id, total_votes, is_winner } = item;
       if (ward_id && candidate_id) {
         const votesCount = parseInt(total_votes, 10) || 0;
-        await client.query(upsertQuery, [ward_id, candidate_id, votesCount]);
+        const winnerStatus = Boolean(is_winner);
+        await client.query(upsertQuery, [ward_id, candidate_id, votesCount, winnerStatus]);
       }
     }
 

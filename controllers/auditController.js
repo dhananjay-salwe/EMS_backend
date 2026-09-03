@@ -6,7 +6,8 @@ exports.getSubmissions = async (req, res) => {
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 10;
     const offset = (page - 1) * limit;
-    const { state, lga, ward, search } = req.query;
+    const { state, lga, ward, search, sort = 'asc' } = req.query;
+    const sortDirection = sort.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
 
     const whereClauses = [];
     const queryParams = [];
@@ -88,7 +89,7 @@ exports.getSubmissions = async (req, res) => {
       JOIN states s ON l.state_id = s.id
       JOIN operators o ON sub.operator_id = o.id
       ${whereSql}
-      ORDER BY sub.created_at DESC
+      ORDER BY b.unique_booth_code ${sortDirection}, sub.created_at DESC
       LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder};
     `;
 
