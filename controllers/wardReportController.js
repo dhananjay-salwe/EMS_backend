@@ -81,7 +81,7 @@ exports.getWardReports = async (req, res) => {
       JOIN lgas l ON w.lga_id = l.id
       LEFT JOIN states s ON l.state_id = s.id
       ${whereSql}
-      ORDER BY w.ward_name ${sortDirection}
+      ORDER BY w.ward_name ASC
       LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder};
     `;
     const wardsRes = await pool.query(wardsQuery, wardsQueryParams);
