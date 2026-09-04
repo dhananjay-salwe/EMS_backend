@@ -33,15 +33,21 @@ exports.getSubmissions = async (req, res) => {
     // FIX: Update whereSql to start with WHERE instead of AND since the latest-only filter is removed
     const whereSql = whereClauses.length > 0 ? ' WHERE ' + whereClauses.join(' AND ') : '';
 
-    // FIX: Remove latest-only subquery filter to return full historical submissions list
+    // Count total booths matching filters
     const countQuery = `
       SELECT COUNT(*)
-      FROM vote_records sub
-      JOIN booths b ON sub.booth_id = b.id
+      FROM booths b
       JOIN wards w ON b.ward_id = w.id
       JOIN lgas l ON w.lga_id = l.id
       JOIN states s ON l.state_id = s.id
-      JOIN operators o ON sub.operator_id = o.id
+      LEFT JOIN LATERAL (
+        SELECT *
+        FROM vote_records vr
+        WHERE vr.booth_id = b.id
+        ORDER BY vr.created_at DESC
+        LIMIT 1
+      ) sub ON true
+      LEFT JOIN operators o ON sub.operator_id = o.id
       ${whereSql};
     `;
 
@@ -53,15 +59,17 @@ exports.getSubmissions = async (req, res) => {
     const limitPlaceholder = `$${queryParams.length - 1}`;
     const offsetPlaceholder = `$${queryParams.length}`;
 
-    // FIX: Include video_url and remove the single-latest-record subquery limitation to output full audit trail
+    // Select primarily from booths with LEFT JOIN to vote_records and operators
     const query = `
       SELECT 
+        b.id AS booth_id,
         sub.id, 
         sub.tally_sheet_url, 
         sub.video_url,
         sub.created_at,
         b.unique_booth_code, 
         b.booth_name,
+        w.id AS ward_id,
         w.ward_name,
         l.lga_name,
         s.state_name,
@@ -82,14 +90,20 @@ exports.getSubmissions = async (req, res) => {
             WHERE vd.vote_record_id = sub.id
           ), '[]'::json
         ) as votes_breakdown
-      FROM vote_records sub
-      JOIN booths b ON sub.booth_id = b.id
+      FROM booths b
       JOIN wards w ON b.ward_id = w.id
       JOIN lgas l ON w.lga_id = l.id
       JOIN states s ON l.state_id = s.id
-      JOIN operators o ON sub.operator_id = o.id
+      LEFT JOIN LATERAL (
+        SELECT *
+        FROM vote_records vr
+        WHERE vr.booth_id = b.id
+        ORDER BY vr.created_at DESC
+        LIMIT 1
+      ) sub ON true
+      LEFT JOIN operators o ON sub.operator_id = o.id
       ${whereSql}
-      ORDER BY b.unique_booth_code ${sortDirection}, sub.created_at DESC
+      ORDER BY b.booth_name ASC
       LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder};
     `;
 
@@ -113,19 +127,73 @@ exports.getSubmissions = async (req, res) => {
   }
 };
 
-// FEATURE: Save moderator verified vote counts
+// FEATURE: Save moderator verified vote counts with upsert support
 exports.verifyAudit = async (req, res) => {
   const { record_id } = req.params;
-  const { verified_votes } = req.body; // Array of { candidate_id, count }
+  const { verified_votes, booth_id } = req.body; // Array of { candidate_id, count }
 
   try {
-    // Loop through the submitted votes and update the specific record
-    for (const vote of verified_votes) {
-      await pool.query(
-        'UPDATE vote_details SET moderator_vote_count = $1 WHERE vote_record_id = $2 AND candidate_id = $3',
-        [vote.count, record_id, vote.candidate_id]
-      );
+    let targetRecordId = null;
+    const parsedId = parseInt(record_id, 10);
+
+    // 1. Check if valid record_id passed
+    if (parsedId && !isNaN(parsedId) && parsedId > 0) {
+      const recRes = await pool.query('SELECT id FROM vote_records WHERE id = $1', [parsedId]);
+      if (recRes.rows.length > 0) {
+        targetRecordId = recRes.rows[0].id;
+      }
     }
+
+    // 2. Fallback: check if vote_records exists for booth_id or create placeholder
+    if (!targetRecordId && booth_id) {
+      const existing = await pool.query(
+        'SELECT id FROM vote_records WHERE booth_id = $1 ORDER BY created_at DESC LIMIT 1',
+        [booth_id]
+      );
+      if (existing.rows.length > 0) {
+        targetRecordId = existing.rows[0].id;
+      } else {
+        // Insert placeholder record into vote_records (with null media)
+        const opRes = await pool.query('SELECT id FROM operators WHERE assigned_booth_id = $1 LIMIT 1', [booth_id]);
+        let opId = opRes.rows[0]?.id;
+        if (!opId) {
+          const anyOp = await pool.query('SELECT id FROM operators ORDER BY id ASC LIMIT 1');
+          opId = anyOp.rows[0]?.id || 1;
+        }
+
+        const newRec = await pool.query(
+          `INSERT INTO vote_records (booth_id, operator_id, tally_sheet_url, video_url, created_at)
+           VALUES ($1, $2, NULL, NULL, NOW()) RETURNING id`,
+          [booth_id, opId]
+        );
+        targetRecordId = newRec.rows[0].id;
+      }
+    }
+
+    if (!targetRecordId) {
+      return res.status(400).json({ success: false, message: 'Invalid record or booth reference' });
+    }
+
+    // 3. Upsert into vote_details
+    for (const vote of (verified_votes || [])) {
+      const count = parseInt(vote.count, 10) || 0;
+      const detailRes = await pool.query(
+        'SELECT id FROM vote_details WHERE vote_record_id = $1 AND candidate_id = $2',
+        [targetRecordId, vote.candidate_id]
+      );
+      if (detailRes.rows.length > 0) {
+        await pool.query(
+          'UPDATE vote_details SET moderator_vote_count = $1 WHERE id = $2',
+          [count, detailRes.rows[0].id]
+        );
+      } else {
+        await pool.query(
+          'INSERT INTO vote_details (vote_record_id, candidate_id, vote_count, moderator_vote_count) VALUES ($1, $2, 0, $3)',
+          [targetRecordId, vote.candidate_id, count]
+        );
+      }
+    }
+
     res.json({ success: true, message: 'Verified counts saved.' });
   } catch (err) {
     console.error("Verification save error:", err);
