@@ -3,11 +3,19 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
 exports.adminLogin = async (req, res) => {
-    const { email, password } = req.body;
+    const { email, username, password } = req.body;
+
+    // 2. Create a fallback identifier
+    const loginIdentifier = email || username;
+
     try {
+        // const result = await pool.query(
+        //     'SELECT id, full_name, email, role, password_hash FROM users WHERE email = $1',
+        //     [email]
+        // );
         const result = await pool.query(
             'SELECT id, full_name, email, role, password_hash FROM users WHERE email = $1',
-            [email]
+            [loginIdentifier]
         );
         
         if (result.rows.length === 0) {
