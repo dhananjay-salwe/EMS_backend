@@ -1,6 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
+const verifyToken = require('../middleware/authMiddleware');
+
+// Protect all admin management routes
+router.use(verifyToken);
 
 router.get('/all', adminController.getAdmins);
 router.post('/add', adminController.addAdmin);

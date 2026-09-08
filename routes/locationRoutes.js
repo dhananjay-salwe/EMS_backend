@@ -1,6 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const locationController = require('../controllers/locationController');
+const verifyToken = require('../middleware/authMiddleware');
+
+// Protect all location routes
+router.use(verifyToken);
 
 router.get('/all', locationController.getAllLocations);
 router.post('/add', locationController.addLocationHierarchy);

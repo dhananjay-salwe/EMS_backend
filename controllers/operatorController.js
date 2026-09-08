@@ -1,4 +1,5 @@
 const { pool } = require('../config/db');
+const bcrypt = require('bcrypt');
 
 exports.getOperators = async (req, res) => {
   try {
@@ -31,9 +32,10 @@ exports.getOperators = async (req, res) => {
 exports.addOperator = async (req, res) => {
   try {
     const { username, password, full_name, assigned_booth_id } = req.body;
+    const hashedPassword = await bcrypt.hash(password, 10);
     await pool.query(
       'INSERT INTO operators (username, password_hash, full_name, assigned_booth_id) VALUES ($1, $2, $3, $4)',
-      [username, password, full_name, assigned_booth_id || null]
+      [username, hashedPassword, full_name, assigned_booth_id || null]
     );
     res.json({ success: true, message: 'Operator created successfully' });
   } catch (err) {
@@ -47,9 +49,10 @@ exports.updateOperator = async (req, res) => {
     const { full_name, username, password, assigned_booth_id } = req.body;
     
     if (password && password.trim() !== '') {
+      const hashedPassword = await bcrypt.hash(password, 10);
       await pool.query(
         'UPDATE operators SET full_name = $1, username = $2, password_hash = $3, assigned_booth_id = $4 WHERE id = $5',
-        [full_name, username, password, assigned_booth_id || null, id]
+        [full_name, username, hashedPassword, assigned_booth_id || null, id]
       );
     } else {
       await pool.query(

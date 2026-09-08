@@ -1,6 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const candidateController = require('../controllers/candidateController');
+const verifyToken = require('../middleware/authMiddleware');
+
+// Protect all candidate routes
+router.use(verifyToken);
 
 router.get('/all', candidateController.getCandidates);
 router.post('/add', candidateController.addCandidate);

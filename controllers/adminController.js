@@ -1,4 +1,5 @@
 const { pool } = require('../config/db');
+const bcrypt = require('bcrypt');
 
 /*
 exports.getAdmins = async (req, res) => {
@@ -64,9 +65,11 @@ exports.addAdmin = async (req, res) => {
   try {
     const { full_name, email, contact_number, password, role, lga_id } = req.body;
     const finalLgaId = lga_id === '' ? null : lga_id;
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
     await pool.query(
       'INSERT INTO users (full_name, email, contact_number, password_hash, role, lga_id) VALUES ($1, $2, $3, $4, $5, $6)',
-      [full_name, email, contact_number, password, role, finalLgaId]
+      [full_name, email, contact_number, hashedPassword, role, finalLgaId]
     );
     res.json({ success: true, message: 'Admin added' });
   } catch (err) {
