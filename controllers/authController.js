@@ -3,12 +3,11 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
 exports.adminLogin = async (req, res) => {
-    const { email, username, password } = req.body;
-    const loginIdentifier = email || username;
+    const { email, password } = req.body;
     try {
         const result = await pool.query(
             'SELECT id, full_name, email, role, password_hash FROM users WHERE email = $1',
-            [loginIdentifier]
+            [email]
         );
         
         if (result.rows.length === 0) {
@@ -55,8 +54,7 @@ exports.adminLogin = async (req, res) => {
 };
 
 exports.operatorLogin = async (req, res) => {
-    const { email, username, password } = req.body;
-    const loginIdentifier = email || username;
+    const { username, password } = req.body;
     try {
         // JOIN with booths to get the assigned booth details on login
         const result = await pool.query(
@@ -66,7 +64,7 @@ exports.operatorLogin = async (req, res) => {
              FROM operators o
              LEFT JOIN booths b ON o.assigned_booth_id = b.id
              WHERE o.username = $1`,
-            [loginIdentifier]
+            [username]
         );
         
         if (result.rows.length === 0) {
