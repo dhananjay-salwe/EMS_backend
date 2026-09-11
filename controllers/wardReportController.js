@@ -80,13 +80,23 @@ exports.getWardReports = async (req, res) => {
         l.lga_name,
         s.state_name,
         (COUNT(wcv.id) > 0) AS is_verified,
-        MAX(wcv.updated_at) AS updated_at
+        MAX(wcv.updated_at) AS updated_at,
+        latest_auditor.full_name AS updated_by_name,
+        latest_auditor.role AS updated_by_role
       FROM wards w
       JOIN lgas l ON w.lga_id = l.id
       LEFT JOIN states s ON l.state_id = s.id
       LEFT JOIN ward_candidate_votes wcv ON w.id = wcv.ward_id
+      LEFT JOIN LATERAL (
+        SELECT u.full_name, u.role
+        FROM ward_candidate_votes wcv2
+        JOIN users u ON wcv2.updated_by_user_id = u.id
+        WHERE wcv2.ward_id = w.id
+        ORDER BY wcv2.updated_at DESC NULLS LAST
+        LIMIT 1
+      ) latest_auditor ON true
       ${whereSql}
-      GROUP BY w.id, w.ward_name, l.id, l.lga_name, s.state_name
+      GROUP BY w.id, w.ward_name, l.id, l.lga_name, s.state_name, latest_auditor.full_name, latest_auditor.role
       ORDER BY w.ward_name ASC
       LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder};
     `;
@@ -137,6 +147,8 @@ exports.getCandidatesByWard = async (req, res) => {
         COALESCE(wcv.total_votes, 0) AS total_votes,
         COALESCE(wcv.is_winner, false) AS is_winner,
         wcv.updated_at,
+        u.full_name AS updated_by_name,
+        u.role AS updated_by_role,
         COALESCE((
           SELECT SUM(vd.vote_count)
           FROM vote_details vd
@@ -147,6 +159,7 @@ exports.getCandidatesByWard = async (req, res) => {
       FROM candidates c
       JOIN political_parties p ON c.party_id = p.id
       LEFT JOIN ward_candidate_votes wcv ON c.id = wcv.candidate_id AND wcv.ward_id = $1
+      LEFT JOIN users u ON wcv.updated_by_user_id = u.id
       WHERE c.ward_id = $1
       ORDER BY c.candidate_name ASC;
     `;
@@ -175,15 +188,18 @@ exports.upsertWardVotes = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid or empty vote counts provided.' });
     }
 
+    const moderatorUserId = req.user?.id || null;
+
     await client.query('BEGIN');
 
     const upsertQuery = `
-      INSERT INTO ward_candidate_votes (ward_id, candidate_id, total_votes, is_winner, updated_at)
-      VALUES ($1, $2, $3, $4, NOW())
+      INSERT INTO ward_candidate_votes (ward_id, candidate_id, total_votes, is_winner, updated_by_user_id, updated_at)
+      VALUES ($1, $2, $3, $4, $5, NOW())
       ON CONFLICT (ward_id, candidate_id)
       DO UPDATE SET 
         total_votes = EXCLUDED.total_votes,
         is_winner = EXCLUDED.is_winner,
+        updated_by_user_id = EXCLUDED.updated_by_user_id,
         updated_at = NOW();
     `;
 
@@ -192,7 +208,7 @@ exports.upsertWardVotes = async (req, res) => {
       if (ward_id && candidate_id) {
         const votesCount = parseInt(total_votes, 10) || 0;
         const winnerStatus = Boolean(is_winner);
-        await client.query(upsertQuery, [ward_id, candidate_id, votesCount, winnerStatus]);
+        await client.query(upsertQuery, [ward_id, candidate_id, votesCount, winnerStatus, moderatorUserId]);
       }
     }
 

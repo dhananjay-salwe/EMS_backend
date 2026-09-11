@@ -74,6 +74,9 @@ exports.getSubmissions = async (req, res) => {
         l.lga_name,
         s.state_name,
         o.full_name as operator_name,
+        latest_audit.updated_by_name,
+        latest_audit.updated_by_role,
+        latest_audit.updated_at,
         COALESCE(
           (
             SELECT json_agg(json_build_object(
@@ -102,6 +105,17 @@ exports.getSubmissions = async (req, res) => {
         LIMIT 1
       ) sub ON true
       LEFT JOIN operators o ON sub.operator_id = o.id
+      LEFT JOIN LATERAL (
+        SELECT 
+          vd.updated_at,
+          u.full_name AS updated_by_name,
+          u.role AS updated_by_role
+        FROM vote_details vd
+        LEFT JOIN users u ON vd.updated_by_user_id = u.id
+        WHERE vd.vote_record_id = sub.id AND vd.moderator_vote_count IS NOT NULL
+        ORDER BY vd.updated_at DESC NULLS LAST
+        LIMIT 1
+      ) latest_audit ON true
       ${whereSql}
       ORDER BY b.booth_name ASC
       LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder};
@@ -175,6 +189,8 @@ exports.verifyAudit = async (req, res) => {
     }
 
     // 3. Upsert into vote_details
+    const moderatorUserId = req.user?.id || null;
+
     for (const vote of (verified_votes || [])) {
       const count = parseInt(vote.count, 10) || 0;
       const detailRes = await pool.query(
@@ -183,13 +199,13 @@ exports.verifyAudit = async (req, res) => {
       );
       if (detailRes.rows.length > 0) {
         await pool.query(
-          'UPDATE vote_details SET moderator_vote_count = $1 WHERE id = $2',
-          [count, detailRes.rows[0].id]
+          'UPDATE vote_details SET moderator_vote_count = $1, updated_by_user_id = $2, updated_at = NOW() WHERE id = $3',
+          [count, moderatorUserId, detailRes.rows[0].id]
         );
       } else {
         await pool.query(
-          'INSERT INTO vote_details (vote_record_id, candidate_id, vote_count, moderator_vote_count) VALUES ($1, $2, 0, $3)',
-          [targetRecordId, vote.candidate_id, count]
+          'INSERT INTO vote_details (vote_record_id, candidate_id, vote_count, moderator_vote_count, updated_by_user_id, updated_at) VALUES ($1, $2, 0, $3, $4, NOW())',
+          [targetRecordId, vote.candidate_id, count, moderatorUserId]
         );
       }
     }
