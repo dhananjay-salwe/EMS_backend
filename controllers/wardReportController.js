@@ -50,6 +50,8 @@ exports.getWardReports = async (req, res) => {
       whereClauses.push(`l.lga_name = $${queryParams.length}`);
     }
 
+    await ensureTableExists();
+
     const whereSql = whereClauses.length > 0 ? ' WHERE ' + whereClauses.join(' AND ') : '';
     const sortDirection = sort.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
 
@@ -65,7 +67,7 @@ exports.getWardReports = async (req, res) => {
     const totalRecords = parseInt(countRes.rows[0].count, 10) || 0;
     const totalPages = Math.ceil(totalRecords / limit) || 1;
 
-    // 2. Fetch paginated Wards
+    // 2. Fetch paginated Wards with verification status
     const wardsQueryParams = [...queryParams, limit, offset];
     const limitPlaceholder = `$${wardsQueryParams.length - 1}`;
     const offsetPlaceholder = `$${wardsQueryParams.length}`;
@@ -76,11 +78,15 @@ exports.getWardReports = async (req, res) => {
         w.ward_name,
         l.id AS lga_id,
         l.lga_name,
-        s.state_name
+        s.state_name,
+        (COUNT(wcv.id) > 0) AS is_verified,
+        MAX(wcv.updated_at) AS updated_at
       FROM wards w
       JOIN lgas l ON w.lga_id = l.id
       LEFT JOIN states s ON l.state_id = s.id
+      LEFT JOIN ward_candidate_votes wcv ON w.id = wcv.ward_id
       ${whereSql}
+      GROUP BY w.id, w.ward_name, l.id, l.lga_name, s.state_name
       ORDER BY w.ward_name ASC
       LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder};
     `;
@@ -129,7 +135,15 @@ exports.getCandidatesByWard = async (req, res) => {
         p.party_code,
         p.party_icon_url,
         COALESCE(wcv.total_votes, 0) AS total_votes,
-        COALESCE(wcv.is_winner, false) AS is_winner
+        COALESCE(wcv.is_winner, false) AS is_winner,
+        wcv.updated_at,
+        COALESCE((
+          SELECT SUM(vd.vote_count)
+          FROM vote_details vd
+          JOIN vote_records vr ON vd.vote_record_id = vr.id
+          JOIN booths b ON vr.booth_id = b.id
+          WHERE b.ward_id = $1 AND vd.candidate_id = c.id
+        ), 0)::int AS original_votes
       FROM candidates c
       JOIN political_parties p ON c.party_id = p.id
       LEFT JOIN ward_candidate_votes wcv ON c.id = wcv.candidate_id AND wcv.ward_id = $1
