@@ -19,8 +19,16 @@ const verifyToken = (req, res, next) => {
     req.user = decoded; // Contains { id, role, iat, exp }
     next();
   } catch (err) {
+    if (err.name === 'TokenExpiredError') {
+      return res.status(401).json({ 
+        success: false, 
+        code: 'TOKEN_EXPIRED',
+        message: 'Your session has expired. Please log in again.' 
+      });
+    }
     return res.status(403).json({ 
       success: false, 
+      code: 'TOKEN_INVALID',
       message: 'Invalid or expired token.' 
     });
   }
