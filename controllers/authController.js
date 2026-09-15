@@ -8,7 +8,7 @@ exports.adminLogin = async (req, res) => {
     const identifier = email || username;
     try {
         const result = await pool.query(
-            'SELECT id, full_name, email, role, password_hash FROM users WHERE email = $1',
+            'SELECT id, full_name, email, role, contact_number, profile_picture, password_hash FROM users WHERE email = $1',
             [identifier]
         );
         
