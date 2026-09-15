@@ -1,4 +1,4 @@
-const { pool } = require('../config/db');
+const { pool, supabase } = require('../config/db');
 const bcrypt = require('bcrypt');
 const { compressProfileImage } = require('../utils/imageCompressor');
 
@@ -93,7 +93,7 @@ exports.updateOperatorProfile = async (req, res) => {
       const oldPic = oldPicRes.rows[0]?.profile_picture;
       if (oldPic) {
         try {
-          const oldFileName = oldPic.split('/').pop();
+          const oldFileName = oldPic.split('/').pop().split('?')[0];
           if (oldFileName) {
             await supabase.storage.from('profile_pictures').remove([oldFileName]);
           }
@@ -102,15 +102,12 @@ exports.updateOperatorProfile = async (req, res) => {
         }
       }
 
-      // 2. Compress the image to WebP (300x300) using sharp utility
-      const relativeCompressedPath = await compressProfileImage(req.file.path);
-      const cleanRelative = relativeCompressedPath.startsWith('/') ? relativeCompressedPath.slice(1) : relativeCompressedPath;
-      const absoluteCompressedPath = path.join(__dirname, '..', cleanRelative);
-
-      // 3. Read compressed buffer and upload to Supabase profile_pictures bucket
-      const fileBuffer = fs.readFileSync(absoluteCompressedPath);
+      // 2. Compress the image buffer directly to WebP (300x300) in memory
+      const compressed = await compressProfileImage(req.file.buffer);
+      const fileBuffer = compressed.buffer || compressed;
       const fileName = `operator_${operatorId}_${Date.now()}.webp`;
 
+      // 3. Upload directly to Supabase profile_pictures bucket
       const { error: uploadError } = await supabase.storage
         .from('profile_pictures')
         .upload(fileName, fileBuffer, {
@@ -127,18 +124,9 @@ exports.updateOperatorProfile = async (req, res) => {
         .getPublicUrl(fileName);
 
       profilePictureUrl = urlData.publicUrl;
-
-      // 4. Remove local compressed temp file if it exists
-      try {
-        if (fs.existsSync(absoluteCompressedPath)) {
-          fs.unlinkSync(absoluteCompressedPath);
-        }
-      } catch (cleanErr) {
-        console.warn('Could not delete local compressed file:', cleanErr.message);
-      }
     }
 
-    // 5. Update operator row in DB
+    // 4. Update operator row in DB
     const { full_name } = req.body;
     const query = `
       UPDATE operators 
@@ -153,10 +141,14 @@ exports.updateOperatorProfile = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Operator not found.' });
     }
 
+    const updatedOp = result.rows[0];
+
     return res.json({
       success: true,
       message: 'Profile updated successfully',
-      operator: result.rows[0]
+      operator: updatedOp,
+      profile_picture: updatedOp.profile_picture,
+      profile_picture_url: updatedOp.profile_picture
     });
   } catch (err) {
     console.error('updateOperatorProfile error:', err);
@@ -182,7 +174,7 @@ exports.removeOperatorProfilePicture = async (req, res) => {
     // 2. Delete file from Supabase storage bucket
     if (currentPath) {
       try {
-        const fileName = currentPath.split('/').pop();
+        const fileName = currentPath.split('/').pop().split('?')[0];
         if (fileName) {
           await supabase.storage.from('profile_pictures').remove([fileName]);
         }
@@ -197,13 +189,19 @@ exports.removeOperatorProfilePicture = async (req, res) => {
       [operatorId]
     );
 
+    const updatedOp = result.rows[0];
+
     return res.json({
       success: true,
       message: 'Profile picture removed successfully',
-      operator: result.rows[0]
+      operator: updatedOp,
+      profile_picture: null,
+      profile_picture_url: null
     });
   } catch (err) {
     console.error('removeOperatorProfilePicture error:', err);
     return res.status(500).json({ success: false, message: `Failed to remove profile picture: ${err.message}` });
   }
 };
+
+exports.getAllOperators = exports.getOperators;
