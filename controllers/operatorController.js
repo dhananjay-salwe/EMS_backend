@@ -1,5 +1,6 @@
 const { pool } = require('../config/db');
 const bcrypt = require('bcrypt');
+const { compressProfileImage } = require('../utils/imageCompressor');
 
 exports.getOperators = async (req, res) => {
   try {
@@ -9,6 +10,7 @@ exports.getOperators = async (req, res) => {
         o.username, 
         o.full_name, 
         o.assigned_booth_id,
+        o.profile_picture,
         o.created_at,
         b.unique_booth_code, 
         b.booth_name,
@@ -72,5 +74,136 @@ exports.deleteOperator = async (req, res) => {
     res.json({ success: true, message: 'Operator deleted' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+
+exports.updateOperatorProfile = async (req, res) => {
+  try {
+    const operatorId = req.user?.id;
+    if (!operatorId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized operator' });
+    }
+
+    let profilePictureUrl = null;
+
+    if (req.file) {
+      // 1. Fetch current profile picture to remove old file if exists
+      const oldPicRes = await pool.query('SELECT profile_picture FROM operators WHERE id = $1', [operatorId]);
+      const oldPic = oldPicRes.rows[0]?.profile_picture;
+      if (oldPic) {
+        try {
+          const oldFileName = oldPic.split('/').pop();
+          if (oldFileName) {
+            await supabase.storage.from('profile_pictures').remove([oldFileName]);
+          }
+        } catch (e) {
+          console.warn('Could not remove old operator picture:', e.message);
+        }
+      }
+
+      // 2. Compress the image to WebP (300x300) using sharp utility
+      const relativeCompressedPath = await compressProfileImage(req.file.path);
+      const cleanRelative = relativeCompressedPath.startsWith('/') ? relativeCompressedPath.slice(1) : relativeCompressedPath;
+      const absoluteCompressedPath = path.join(__dirname, '..', cleanRelative);
+
+      // 3. Read compressed buffer and upload to Supabase profile_pictures bucket
+      const fileBuffer = fs.readFileSync(absoluteCompressedPath);
+      const fileName = `operator_${operatorId}_${Date.now()}.webp`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('profile_pictures')
+        .upload(fileName, fileBuffer, {
+          contentType: 'image/webp',
+          upsert: true
+        });
+
+      if (uploadError) {
+        throw new Error(`Supabase storage upload error: ${uploadError.message}`);
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('profile_pictures')
+        .getPublicUrl(fileName);
+
+      profilePictureUrl = urlData.publicUrl;
+
+      // 4. Remove local compressed temp file if it exists
+      try {
+        if (fs.existsSync(absoluteCompressedPath)) {
+          fs.unlinkSync(absoluteCompressedPath);
+        }
+      } catch (cleanErr) {
+        console.warn('Could not delete local compressed file:', cleanErr.message);
+      }
+    }
+
+    // 5. Update operator row in DB
+    const { full_name } = req.body;
+    const query = `
+      UPDATE operators 
+      SET profile_picture = COALESCE($1, profile_picture),
+          full_name = COALESCE($2, full_name)
+      WHERE id = $3
+      RETURNING id, username, full_name, assigned_booth_id, profile_picture
+    `;
+    const result = await pool.query(query, [profilePictureUrl, full_name ? full_name.trim() : null, operatorId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Operator not found.' });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      operator: result.rows[0]
+    });
+  } catch (err) {
+    console.error('updateOperatorProfile error:', err);
+    return res.status(500).json({ success: false, message: `Failed to update profile: ${err.message}` });
+  }
+};
+
+exports.removeOperatorProfilePicture = async (req, res) => {
+  try {
+    const operatorId = req.user?.id;
+    if (!operatorId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized operator' });
+    }
+
+    // 1. Fetch current profile picture from DB
+    const opRes = await pool.query('SELECT profile_picture FROM operators WHERE id = $1', [operatorId]);
+    if (opRes.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Operator not found.' });
+    }
+
+    const currentPath = opRes.rows[0].profile_picture;
+
+    // 2. Delete file from Supabase storage bucket
+    if (currentPath) {
+      try {
+        const fileName = currentPath.split('/').pop();
+        if (fileName) {
+          await supabase.storage.from('profile_pictures').remove([fileName]);
+        }
+      } catch (unlinkErr) {
+        console.warn('Could not remove file from Supabase storage:', unlinkErr.message);
+      }
+    }
+
+    // 3. Set profile_picture to NULL in operators table
+    const result = await pool.query(
+      'UPDATE operators SET profile_picture = NULL WHERE id = $1 RETURNING id, username, full_name, assigned_booth_id, profile_picture',
+      [operatorId]
+    );
+
+    return res.json({
+      success: true,
+      message: 'Profile picture removed successfully',
+      operator: result.rows[0]
+    });
+  } catch (err) {
+    console.error('removeOperatorProfilePicture error:', err);
+    return res.status(500).json({ success: false, message: `Failed to remove profile picture: ${err.message}` });
   }
 };

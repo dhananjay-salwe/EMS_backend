@@ -60,7 +60,7 @@ exports.operatorLogin = async (req, res) => {
     try {
         // JOIN with booths to get the assigned booth details on login
         const result = await pool.query(
-            `SELECT o.id, o.username, o.full_name, o.password_hash, o.assigned_booth_id,
+            `SELECT o.id, o.username, o.full_name, o.password_hash, o.assigned_booth_id, o.profile_picture,
                     b.booth_name, b.unique_booth_code, w.ward_name, l.lga_name, s.state_name
              FROM operators o
              LEFT JOIN booths b ON o.assigned_booth_id = b.id
@@ -250,4 +250,4 @@ exports.removeProfilePicture = async (req, res) => {
     console.error('Remove profile picture error:', err);
     return res.status(500).json({ success: false, message: 'Server error removing profile picture.' });
   }
-};
+};
