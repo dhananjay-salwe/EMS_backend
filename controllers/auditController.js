@@ -7,47 +7,37 @@ exports.getSubmissions = async (req, res) => {
     const limit = parseInt(req.query.limit, 10) || 10;
     const offset = (page - 1) * limit;
     const { state, lga, ward, search, sort = 'asc' } = req.query;
-    const sortDirection = sort.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
 
     const whereClauses = [];
     const queryParams = [];
 
-    if (state) {
-      queryParams.push(state);
-      whereClauses.push(`s.state_name = $${queryParams.length}`);
+    if (state && state !== 'undefined' && state !== 'null') {
+      queryParams.push(state.trim());
+      whereClauses.push(`TRIM(s.state_name) ILIKE $${queryParams.length}`);
     }
-    if (lga) {
-      queryParams.push(lga);
-      whereClauses.push(`l.lga_name = $${queryParams.length}`);
+    if (lga && lga !== 'undefined' && lga !== 'null') {
+      queryParams.push(lga.trim());
+      whereClauses.push(`TRIM(l.lga_name) ILIKE $${queryParams.length}`);
     }
-    if (ward) {
-      queryParams.push(ward);
-      whereClauses.push(`w.ward_name = $${queryParams.length}`);
+    if (ward && ward !== 'undefined' && ward !== 'null') {
+      queryParams.push(ward.trim());
+      whereClauses.push(`(TRIM(w.ward_name) ILIKE $${queryParams.length} OR w.id::text = $${queryParams.length})`);
     }
-    if (search) {
-      queryParams.push(`%${search}%`);
+    if (search && search !== 'undefined' && search !== 'null') {
+      queryParams.push(`%${search.trim()}%`);
       whereClauses.push(`(o.full_name ILIKE $${queryParams.length} OR b.unique_booth_code ILIKE $${queryParams.length} OR b.booth_name ILIKE $${queryParams.length})`);
     }
 
-
-    // FIX: Update whereSql to start with WHERE instead of AND since the latest-only filter is removed
     const whereSql = whereClauses.length > 0 ? ' WHERE ' + whereClauses.join(' AND ') : '';
 
-    // Count total booths matching filters
+    // Count total booths matching filters (strictly booth-first, no vote_records dependency)
     const countQuery = `
-      SELECT COUNT(*)
+      SELECT COUNT(DISTINCT b.id)
       FROM booths b
       JOIN wards w ON b.ward_id = w.id
-      JOIN lgas l ON w.lga_id = l.id
-      JOIN states s ON l.state_id = s.id
-      LEFT JOIN LATERAL (
-        SELECT *
-        FROM vote_records vr
-        WHERE vr.booth_id = b.id
-        ORDER BY vr.created_at DESC
-        LIMIT 1
-      ) sub ON true
-      LEFT JOIN operators o ON sub.operator_id = o.id
+      LEFT JOIN lgas l ON w.lga_id = l.id
+      LEFT JOIN states s ON l.state_id = s.id
+      LEFT JOIN operators o ON b.id = o.assigned_booth_id
       ${whereSql};
     `;
 
@@ -59,11 +49,11 @@ exports.getSubmissions = async (req, res) => {
     const limitPlaceholder = `$${queryParams.length - 1}`;
     const offsetPlaceholder = `$${queryParams.length}`;
 
-    // Select primarily from booths with LEFT JOIN to vote_records and operators
+    // Select primarily from booths with LEFT JOIN to operators and LATERAL vote_records
     const query = `
       SELECT 
         b.id AS booth_id,
-        b.registered_voters,
+        COALESCE(b.registered_voters, 0) AS registered_voters,
         sub.id, 
         sub.tally_sheet_url, 
         sub.video_url,
@@ -74,7 +64,7 @@ exports.getSubmissions = async (req, res) => {
         w.ward_name,
         l.lga_name,
         s.state_name,
-        o.full_name as operator_name,
+        o.full_name AS operator_name,
         latest_audit.updated_by_name,
         latest_audit.updated_by_role,
         latest_audit.updated_at,
@@ -93,19 +83,23 @@ exports.getSubmissions = async (req, res) => {
             JOIN political_parties p ON c.party_id = p.id
             WHERE vd.vote_record_id = sub.id
           ), '[]'::json
-        ) as votes_breakdown
+        ) AS votes_breakdown
       FROM booths b
       JOIN wards w ON b.ward_id = w.id
-      JOIN lgas l ON w.lga_id = l.id
-      JOIN states s ON l.state_id = s.id
+      LEFT JOIN lgas l ON w.lga_id = l.id
+      LEFT JOIN states s ON l.state_id = s.id
+      LEFT JOIN operators o ON b.id = o.assigned_booth_id
       LEFT JOIN LATERAL (
-        SELECT *
+        SELECT 
+          vr.id,
+          vr.tally_sheet_url,
+          vr.video_url,
+          vr.created_at
         FROM vote_records vr
         WHERE vr.booth_id = b.id
         ORDER BY vr.created_at DESC
         LIMIT 1
       ) sub ON true
-      LEFT JOIN operators o ON sub.operator_id = o.id
       LEFT JOIN LATERAL (
         SELECT 
           vd.updated_at,
@@ -138,7 +132,7 @@ exports.getSubmissions = async (req, res) => {
     console.error("Audit fetch error:", err);
     res
       .status(500)
-      .json({ success: false, message: "Failed to fetch audit records" });
+      .json({ success: false, message: "Failed to fetch audit records: " + err.message });
   }
 };
 
